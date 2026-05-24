@@ -1,0 +1,618 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Samba Drum Synth - Drum Machine</title>
+    
+    <!-- Google Fonts: Inter for premium, clean typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for minimalist icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <!-- Tailwind Theme Customization (Strict Monochrome Theme) -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        monochrome: {
+                            black: '#000000',
+                            darkest: '#0A0A0A',
+                            dark: '#121212',
+                            card: '#1C1C1E',
+                            border: '#2C2C2E',
+                            muted: '#8E8E93',
+                            light: '#E5E5EA',
+                            white: '#FFFFFF',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- ========================================== -->
+    <!--       WEB AUDIO API SYNTHESIS ENGINE       -->
+    <!-- ========================================== -->
+    <script>
+        let audioCtx = null;
+        let masterGain = null;
+        let analyser = null;
+        let noiseBuffer = null;
+        
+        let canvas = null;
+        let canvasCtx = null;
+        let animationId = null;
+        let visualizerMode = 'bars'; 
+        let isEngineReady = false;
+
+        // Drum Pad Configuration mapped to keyboard keys
+        const DRUM_PADS = [
+            { id: 'pad-q', key: 'q', name: 'Tamborim', type: 'tamborim' },
+            { id: 'pad-w', key: 'w', name: 'Agogô Low', type: 'agogoLow' },
+            { id: 'pad-e', key: 'e', name: 'Agogô High', type: 'agogoHigh' },
+            { id: 'pad-r', key: 'r', name: 'Apito Whistle', type: 'apito' },
+            { id: 'pad-a', key: 'a', name: 'Surdo Marcacão', type: 'surdoLow' },
+            { id: 'pad-s', key: 's', name: 'Surdo Resposta', type: 'surdoMid' },
+            { id: 'pad-d', key: 'd', name: 'Caixa (Snare)', type: 'caixa' },
+            { id: 'pad-f', key: 'f', name: 'Repique', type: 'repique' }
+        ];
+
+        function initAudioEngine() {
+            if (isEngineReady) return;
+
+            try {
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                // Master Channel & Analyser
+                masterGain = audioCtx.createGain();
+                masterGain.gain.value = 0.8;
+                
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 256;
+                
+                masterGain.connect(analyser);
+                analyser.connect(audioCtx.destination);
+
+                // Pre-calculate White Noise Buffer for snares and shakers
+                const bufferSize = audioCtx.sampleRate * 2; // 2 seconds of noise
+                noiseBuffer = audioCtx.createBuffer(1, bufferSize, audioCtx.sampleRate);
+                const output = noiseBuffer.getChannelData(0);
+                for (let i = 0; i < bufferSize; i++) {
+                    output[i] = Math.random() * 2 - 1;
+                }
+
+                const led = document.getElementById('audio-engine-led');
+                if (led) led.className = "w-2.5 h-2.5 rounded-full bg-monochrome-white";
+
+                const overlay = document.getElementById('visualizer-overlay');
+                if (overlay) overlay.classList.add('opacity-0');
+
+                isEngineReady = true;
+                startVisualizerDrawing();
+                showToast("Engine Online", "Synthesis engine activated. Ready to play.", "fa-bolt");
+            } catch (err) {
+                console.error("Audio Context initialization failed:", err);
+            }
+        }
+
+        // ==========================================
+        // INSTRUMENT SYNTHESIS RECIPES
+        // ==========================================
+
+        function playSynth(type) {
+            if (!isEngineReady) initAudioEngine();
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            
+            const time = audioCtx.currentTime;
+
+            switch (type) {
+                case 'surdoLow':
+                    synthSurdo(time, 60, 40, 0.8);
+                    break;
+                case 'surdoMid':
+                    synthSurdo(time, 90, 60, 0.6);
+                    break;
+                case 'caixa':
+                    synthCaixa(time);
+                    break;
+                case 'repique':
+                    synthRepique(time);
+                    break;
+                case 'tamborim':
+                    synthTamborim(time);
+                    break;
+                case 'agogoLow':
+                    synthAgogo(time, 500);
+                    break;
+                case 'agogoHigh':
+                    synthAgogo(time, 750);
+                    break;
+                case 'apito':
+                    synthApito(time);
+                    break;
+            }
+        }
+
+        // Deep Bass Drum (Sine wave with pitch drop)
+        function synthSurdo(time, startFreq, endFreq, decay) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            osc.connect(gain);
+            gain.connect(masterGain);
+            
+            osc.frequency.setValueAtTime(startFreq, time);
+            osc.frequency.exponentialRampToValueAtTime(endFreq, time + decay * 0.2);
+            
+            gain.gain.setValueAtTime(1, time);
+            gain.gain.exponentialRampToValueAtTime(0.001, time + decay);
+            
+            osc.start(time);
+            osc.stop(time + decay);
+        }
+
+        // Snare / Caixa (Noise + snap)
+        function synthCaixa(time) {
+            // Snare pop
+            const osc = audioCtx.createOscillator();
+            const oscGain = audioCtx.createGain();
+            osc.type = 'triangle';
+            osc.connect(oscGain);
+            oscGain.connect(masterGain);
+            osc.frequency.setValueAtTime(250, time);
+            oscGain.gain.setValueAtTime(0.8, time);
+            oscGain.gain.exponentialRampToValueAtTime(0.01, time + 0.1);
+            osc.start(time);
+            osc.stop(time + 0.1);
+
+            // Snare rattle (Noise)
+            const noise = audioCtx.createBufferSource();
+            const noiseGain = audioCtx.createGain();
+            noise.buffer = noiseBuffer;
+            
+            // Filter noise to sound like a snare
+            const filter = audioCtx.createBiquadFilter();
+            filter.type = 'highpass';
+            filter.frequency.value = 1000;
+            
+            noise.connect(filter);
+            filter.connect(noiseGain);
+            noiseGain.connect(masterGain);
+            
+            noiseGain.gain.setValueAtTime(0.6, time);
+            noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.2);
+            
+            noise.start(time);
+            noise.stop(time + 0.2);
+        }
+
+        // Repique (Tom drum)
+        function synthRepique(time) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc.type = 'triangle';
+            osc.connect(gain);
+            gain.connect(masterGain);
+            
+            osc.frequency.setValueAtTime(300, time);
+            osc.frequency.exponentialRampToValueAtTime(200, time + 0.1);
+            
+            gain.gain.setValueAtTime(0.9, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.25);
+            
+            osc.start(time);
+            osc.stop(time + 0.25);
+        }
+
+        // Tamborim (High sharp slap)
+        function synthTamborim(time) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            osc.type = 'square';
+            osc.connect(gain);
+            gain.connect(masterGain);
+            
+            osc.frequency.setValueAtTime(800, time);
+            gain.gain.setValueAtTime(0.5, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.05);
+            osc.start(time);
+            osc.stop(time + 0.05);
+            
+            // Sharp noise transient
+            const noise = audioCtx.createBufferSource();
+            const noiseGain = audioCtx.createGain();
+            noise.buffer = noiseBuffer;
+            noise.connect(noiseGain);
+            noiseGain.connect(masterGain);
+            noiseGain.gain.setValueAtTime(0.8, time);
+            noiseGain.gain.exponentialRampToValueAtTime(0.01, time + 0.08);
+            noise.start(time);
+            noise.stop(time + 0.08);
+        }
+
+        // Agogô Bell (FM Synthesis / Additive)
+        function synthAgogo(time, baseFreq) {
+            const osc1 = audioCtx.createOscillator();
+            const osc2 = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            
+            osc1.type = 'sine';
+            osc2.type = 'square'; // Adds overtones
+            
+            osc1.connect(gain);
+            osc2.connect(gain);
+            gain.connect(masterGain);
+            
+            osc1.frequency.setValueAtTime(baseFreq, time);
+            osc2.frequency.setValueAtTime(baseFreq * 1.5, time);
+            
+            gain.gain.setValueAtTime(0.6, time);
+            gain.gain.exponentialRampToValueAtTime(0.01, time + 0.3);
+            
+            osc1.start(time);
+            osc2.start(time);
+            osc1.stop(time + 0.3);
+            osc2.stop(time + 0.3);
+        }
+
+        // Apito (Carnival Whistle with Vibrato)
+        function synthApito(time) {
+            const osc = audioCtx.createOscillator();
+            const gain = audioCtx.createGain();
+            const lfo = audioCtx.createOscillator(); // Vibrato
+            const lfoGain = audioCtx.createGain();
+            
+            osc.type = 'sine';
+            lfo.type = 'sine';
+            
+            // LFO for vibrato effect
+            lfo.frequency.value = 15; // Fast vibrato speed
+            lfoGain.gain.value = 50;  // Vibrato depth (frequency variation amount)
+            
+            lfo.connect(lfoGain);
+            lfoGain.connect(osc.frequency);
+            
+            osc.connect(gain);
+            gain.connect(masterGain);
+            
+            osc.frequency.setValueAtTime(2200, time);
+            
+            // Envelope - slightly longer blow
+            gain.gain.setValueAtTime(0, time);
+            gain.gain.linearRampToValueAtTime(0.5, time + 0.05); // Attack
+            gain.gain.setValueAtTime(0.5, time + 0.2); // Sustain
+            gain.gain.linearRampToValueAtTime(0, time + 0.4); // Release
+            
+            osc.start(time);
+            lfo.start(time);
+            osc.stop(time + 0.4);
+            lfo.stop(time + 0.4);
+        }
+
+        // ==========================================
+        // VISUALIZER & UI LOGIC
+        // ==========================================
+
+        function startVisualizerDrawing() {
+            canvas = document.getElementById('visualizer-canvas');
+            canvasCtx = canvas.getContext('2d');
+            
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.clientWidth * dpr;
+            canvas.height = canvas.clientHeight * dpr;
+            canvasCtx.scale(dpr, dpr);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                const width = canvas.width / dpr;
+                const height = canvas.height / dpr;
+
+                if (visualizerMode === 'wave') {
+                    analyser.getByteTimeDomainData(dataArray);
+                } else {
+                    analyser.getByteFrequencyData(dataArray);
+                }
+
+                // Render flat black background
+                canvasCtx.fillStyle = '#000000';
+                canvasCtx.fillRect(0, 0, width, height);
+
+                if (visualizerMode === 'bars') {
+                    const barWidth = (width / bufferLength) * 2;
+                    let barHeight;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        barHeight = (dataArray[i] / 255) * height * 0.95;
+
+                        canvasCtx.fillStyle = '#FFFFFF';
+                        canvasCtx.fillRect(x, height - barHeight, barWidth - 2, barHeight);
+
+                        x += barWidth;
+                    }
+                } 
+                else if (visualizerMode === 'wave') {
+                    canvasCtx.lineWidth = 2;
+                    canvasCtx.strokeStyle = '#FFFFFF';
+                    canvasCtx.beginPath();
+
+                    const sliceWidth = width / bufferLength;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = (v * height) / 2;
+
+                        if (i === 0) {
+                            canvasCtx.moveTo(x, y);
+                        } else {
+                            canvasCtx.lineTo(x, y);
+                        }
+
+                        x += sliceWidth;
+                    }
+
+                    canvasCtx.lineTo(width, height / 2);
+                    canvasCtx.stroke();
+                }
+            }
+            draw();
+        }
+
+        function changeVisualizerMode(mode) {
+            visualizerMode = mode;
+            document.getElementById('v-mode-bars').className = mode === 'bars' ? 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all' : 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all';
+            document.getElementById('v-mode-wave').className = mode === 'wave' ? 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all' : 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all';
+        }
+
+        function updateMasterVolume(val) {
+            if (masterGain) {
+                masterGain.gain.value = val;
+            }
+            const volIcon = document.getElementById('volume-icon');
+            if (val == 0) {
+                volIcon.className = "fa-solid fa-volume-xmark text-monochrome-muted";
+            } else if (val < 0.5) {
+                volIcon.className = "fa-solid fa-volume-low text-monochrome-muted";
+            } else {
+                volIcon.className = "fa-solid fa-volume-high text-monochrome-white";
+            }
+        }
+
+        // ==========================================
+        // INTERACTION & EVENTS
+        // ==========================================
+
+        function triggerPad(keyStr) {
+            const padConfig = DRUM_PADS.find(p => p.key === keyStr.toLowerCase());
+            if (padConfig) {
+                // Play audio
+                playSynth(padConfig.type);
+                
+                // Visual feedback on pad
+                const padElement = document.getElementById(padConfig.id);
+                if (padElement) {
+                    padElement.classList.add('bg-monochrome-white', 'text-monochrome-black');
+                    padElement.classList.remove('bg-monochrome-dark', 'text-monochrome-white');
+                    
+                    setTimeout(() => {
+                        padElement.classList.remove('bg-monochrome-white', 'text-monochrome-black');
+                        padElement.classList.add('bg-monochrome-dark', 'text-monochrome-white');
+                    }, 100);
+                }
+            }
+        }
+
+        window.addEventListener('keydown', (e) => {
+            if (e.repeat) return; // Prevent machine-gunning if key held down
+            triggerPad(e.key);
+        });
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Generate Drum Pads in UI
+            const grid = document.getElementById('drum-grid');
+            grid.innerHTML = '';
+            
+            DRUM_PADS.forEach(pad => {
+                const btn = document.createElement('button');
+                btn.id = pad.id;
+                btn.className = "h-24 bg-monochrome-dark border border-monochrome-border rounded-lg flex flex-col items-center justify-center gap-2 transition-colors duration-75 select-none active:scale-95";
+                
+                // On Mouse/Touch Down trigger
+                const triggerAction = (e) => {
+                    e.preventDefault();
+                    triggerPad(pad.key);
+                };
+                
+                btn.addEventListener('mousedown', triggerAction);
+                btn.addEventListener('touchstart', triggerAction, {passive: false});
+
+                btn.innerHTML = `
+                    <span class="text-[10px] font-mono tracking-widest text-monochrome-muted uppercase">Key ${pad.key.toUpperCase()}</span>
+                    <span class="font-bold text-sm tracking-wide text-inherit">${pad.name}</span>
+                `;
+                grid.appendChild(btn);
+            });
+        });
+
+        function showToast(title, desc, iconClass) {
+            const toast = document.getElementById('toast-notif');
+            const icon = document.getElementById('toast-icon');
+            const tTitle = document.getElementById('toast-title');
+            const tDesc = document.getElementById('toast-desc');
+
+            tTitle.textContent = title;
+            tDesc.textContent = desc;
+            icon.className = `text-sm ${iconClass} text-monochrome-white`;
+            
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 3000);
+        }
+    </script>
+
+    <!-- Visual Scrollbar Tuning -->
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2C2C2E;
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8E8E93;
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+
+<body class="bg-monochrome-black text-monochrome-light font-sans min-h-full flex flex-col justify-between overflow-x-hidden">
+
+    <!-- Header Navigation -->
+    <header class="border-b border-monochrome-border bg-monochrome-darkest sticky top-0 z-40">
+        <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="text-xl text-monochrome-white"><i class="fa-solid fa-drum text-sm"></i></span>
+                <div>
+                    <h1 class="text-sm font-bold tracking-widest text-monochrome-white uppercase">
+                        Samba Drum Synth
+                    </h1>
+                </div>
+            </div>
+            
+            <!-- Dynamic Navigation Menu - DRUMS HIGHLIGHTED -->
+            <nav class="flex items-center gap-4 text-xs font-mono tracking-widest uppercase">
+                <a href="/drums.html" class="text-monochrome-white font-bold border-b-2 border-monochrome-white py-1">drums</a>
+                <span class="text-monochrome-border">|</span>
+                <a href="/listen.html" class="text-monochrome-muted hover:text-monochrome-white transition-colors py-1">music</a>
+                <span class="text-monochrome-border">|</span>
+                <a href="/creator.html" class="text-monochrome-muted hover:text-monochrome-white transition-colors py-1">creator</a>
+            </nav>
+            
+            <div class="hidden md:flex items-center gap-4">
+                <span class="px-2.5 py-1 rounded bg-monochrome-card border border-monochrome-border text-[10px] tracking-wider text-monochrome-muted font-mono uppercase">
+                    Zero-Asset Synth
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Synth Structure -->
+    <main class="max-w-5xl mx-auto px-6 py-12 flex-grow flex flex-col justify-center w-full">
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-10 items-start">
+            
+            <!-- Left Column: Context -->
+            <div class="lg:col-span-4 flex flex-col gap-8">
+                <div>
+                    <h1 class="text-3xl font-black tracking-tight text-monochrome-white uppercase mb-4 leading-none">
+                        Carnival Synthesizer
+                    </h1>
+                    <p class="text-sm text-monochrome-muted leading-relaxed mb-6">
+                        A drum kit to emulate authentic Brazilian Samba batucada percussion.
+                    </p>
+                    <p class="text-xs font-mono text-monochrome-muted leading-relaxed p-4 border border-monochrome-border bg-monochrome-dark rounded-lg">
+                        <strong>INSTRUCTIONS:</strong><br><br>
+                        Click the pads on the right, or press the corresponding keys on your keyboard to trigger sounds. (PC recommended)<br><br>
+                        Top Row: <span class="text-monochrome-white">Q, W, E, R</span><br>
+                        Bottom Row: <span class="text-monochrome-white">A, S, D, F</span>
+                    </p>
+                </div>
+
+                <div class="flex items-center justify-between border-t border-monochrome-border pt-6">
+                    <span class="text-[10px] font-bold tracking-widest text-monochrome-muted uppercase">Master Volume</span>
+                    <div class="flex items-center gap-3 bg-monochrome-card border border-monochrome-border py-1.5 px-3 rounded-lg">
+                        <i class="fa-solid fa-volume-high text-monochrome-white text-xs" id="volume-icon"></i>
+                        <input type="range" min="0" max="1" step="0.01" value="0.8" oninput="updateMasterVolume(this.value)" class="w-24 accent-monochrome-white h-0.5 bg-monochrome-border rounded-lg cursor-pointer">
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Visualizer & Pads -->
+            <div class="lg:col-span-8 flex flex-col gap-6">
+                
+                <!-- Frequency Visualizer Canvas Panel -->
+                <div class="bg-monochrome-dark border border-monochrome-border p-6 rounded-xl flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2">
+                            <h4 class="text-[10px] font-bold tracking-widest text-monochrome-muted uppercase">Synth Output Analyser</h4>
+                            <div id="audio-engine-led" class="w-2 h-2 rounded-full bg-monochrome-border transition-all"></div>
+                        </div>
+                        
+                        <!-- Visualizer Modes Selection -->
+                        <div class="flex gap-1 bg-monochrome-black p-0.5 rounded border border-monochrome-border">
+                            <button onclick="changeVisualizerMode('bars')" id="v-mode-bars" class="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all">Bars</button>
+                            <button onclick="changeVisualizerMode('wave')" id="v-mode-wave" class="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all">Wave</button>
+                        </div>
+                    </div>
+
+                    <!-- Canvas Container Frame -->
+                    <div class="bg-monochrome-black border border-monochrome-border rounded-lg h-32 overflow-hidden relative flex items-center justify-center">
+                        <div id="visualizer-overlay" class="absolute inset-0 flex flex-col items-center justify-center z-10 bg-monochrome-black/95 transition-all pointer-events-none">
+                            <p class="text-[10px] font-mono tracking-wider text-monochrome-muted uppercase animate-pulse">Press any key or click a pad to wake synth</p>
+                        </div>
+                        <canvas id="visualizer-canvas" class="w-full h-full bg-monochrome-black"></canvas>
+                    </div>
+                </div>
+
+                <!-- 8-Pad Drum Grid -->
+                <div class="bg-monochrome-card border border-monochrome-border p-6 rounded-xl">
+                    <div id="drum-grid" class="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <!-- Drum pads are injected via JavaScript -->
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- UI Action Notification Overlay Toast -->
+    <div id="toast-notif" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-monochrome-dark border border-monochrome-white p-4 rounded-lg shadow-2xl flex items-center gap-3">
+        <span id="toast-icon" class="text-sm text-monochrome-white"><i class="fa-solid fa-bolt"></i></span>
+        <div>
+            <h5 id="toast-title" class="text-xs font-bold text-monochrome-white uppercase tracking-wider">System</h5>
+            <p id="toast-desc" class="text-[10px] text-monochrome-muted font-mono">Process loaded successfully.</p>
+        </div>
+    </div>
+
+    <!-- Minimalist Footer -->
+ <footer class="border-t border-monochrome-border py-6 text-center text-[10px] text-monochrome-muted bg-monochrome-darkest relative z-10 font-mono">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p>© 2026 Andrew Gx (<a href="https://andrewgx.com" target="_blank" class="hover:text-monochrome-white transition-colors">andrewgx.com</a>).</p>
+            <div class="flex items-center gap-4">
+                <span>•</span>
+                <a href="/creator.html"target="_blank" class="hover:text-monochrome-white transition-colors">Open source! check it out!</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>

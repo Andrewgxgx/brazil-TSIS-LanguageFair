@@ -1,0 +1,775 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Samba Tracks - Monochrome Audio Player</title>
+    
+    <!-- Google Fonts: Inter for premium, clean typography -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Tailwind CSS CDN -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    
+    <!-- FontAwesome for minimalist icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                    },
+                    colors: {
+                        monochrome: {
+                            black: '#000000',
+                            darkest: '#0A0A0A',
+                            dark: '#121212',
+                            card: '#1C1C1E',
+                            border: '#2C2C2E',
+                            muted: '#8E8E93',
+                            light: '#E5E5EA',
+                            white: '#FFFFFF',
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+
+    <!-- ========================================== -->
+    <!--  QUICK TRACK CONFIGURATION AT THE VERY TOP  -->
+    <!-- ========================================== -->
+    <script>
+        
+        const TRACK_PLAYLIST = [
+            {
+                id: 1,
+                title: "01. Rio Carnival Samba Music",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/hitslab-brazil-rio-carnival-samba-music-477588.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "1:20"
+            },
+            {
+                id: 2,
+                title: "02. Rio Samba 2025 Groove",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/playlistsons-rio-samba-308798.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "3:57"
+            },
+            {
+                id: 3,
+                title: "03. Carnival Dream Batucada",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/carnival_DREAM.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "1:39"
+            },
+            {
+                id: 4,
+                title: "04. Rhythms of Rio",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/rhy.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "2:41"
+            },
+            {
+                id: 5,
+                title: "05. UGHH The Carnival BLOWS",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/blow.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "1:40"
+            },
+            {
+                id: 6,
+                title: "06. Rio at Night (The cool jazz mix)",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/rionight.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "5:44"
+            },
+            {
+                id: 7,
+                title: "07. Brisa do Mar - Carnival Vibes",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/brisa.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "5:02"
+            },
+            {
+                id: 8,
+                title: "08. upbeat samba",
+                url: "https://cf-r2-web-main-andrewgx-com.andrewgx.com/brazil.andrewgx.com/Music%20listen/upbeat.mp3",
+                source: "R2 + PixaBay CC0",
+                duration: "6:03"
+            }
+        ];
+    </script>
+
+    <!-- ========================================== -->
+    <!--          GLOBAL JAVASCRIPT LOGIC           -->
+    <!-- ========================================== -->
+    <script>
+        let audioCtx = null;
+        let analyser = null;
+        let sourceNode = null;
+        let canvas = null;
+        let canvasCtx = null;
+        let animationId = null;
+        let visualizerMode = 'bars'; // 'bars' or 'wave'
+        let currentTrackIndex = 0;
+        let retryCount = 0;
+        let isFallbackMode = false;
+        let watchdogTimer = null;
+
+        // Elements we will query once the DOM is fully loaded
+        let audioEl;
+        let playBtn;
+        let playIcon;
+        let seekBar;
+        let seekContainer;
+        let timeCurrent;
+        let timeTotal;
+        let trackTitle;
+        let trackArtist;
+
+        window.addEventListener('load', () => {
+            // Bind DOM variables
+            audioEl = document.getElementById('main-audio');
+            playBtn = document.getElementById('play-btn');
+            playIcon = document.getElementById('play-icon');
+            seekBar = document.getElementById('seek-bar');
+            seekContainer = document.getElementById('seek-container');
+            timeCurrent = document.getElementById('time-current');
+            timeTotal = document.getElementById('time-total');
+            trackTitle = document.getElementById('track-title');
+            trackArtist = document.getElementById('track-artist');
+
+            // Render the tracks dynamically inside the playlist panel
+            renderPlaylistUI();
+
+            // Set up initial active track from our list without autoPlay
+            loadTrackAtIndex(0, false);
+
+            // Playback Watchdog Events to monitor performance and bypass CORS stalls
+            audioEl.addEventListener('play', () => {
+                startWatchdog();
+            });
+            audioEl.addEventListener('pause', () => {
+                stopWatchdog();
+            });
+
+            // Add auto-advance when a track finishes playing
+            audioEl.addEventListener('ended', () => {
+                stopWatchdog();
+                let nextIndex = (currentTrackIndex + 1) % TRACK_PLAYLIST.length;
+                loadTrackAtIndex(nextIndex, true);
+            });
+
+            // Robust playback and CORS Error Handler
+            audioEl.addEventListener('error', () => {
+                console.error("Audio stream load failure:", audioEl.error);
+                
+                if (audioEl.hasAttribute('crossorigin') && retryCount < 1) {
+                    retryCount++;
+                    const currentTrack = TRACK_PLAYLIST[currentTrackIndex];
+                    
+                    // LEVEL 1: Append a cache-buster query parameter to break through old browser cache
+                    const bustUrl = currentTrack.url + (currentTrack.url.includes('?') ? '&' : '?') + 'nocache=' + Date.now();
+                    console.warn("Retrying playback with cache-buster:", bustUrl);
+                    
+                    audioEl.src = bustUrl;
+                    audioEl.load();
+                    playAudio();
+                    showToast("CORS Sync", "Bypassing browser CORS cache...", "fa-rotate");
+                } 
+                else {
+                    triggerCorsFallback();
+                }
+            });
+        });
+
+        // Watchdog function to detect browser silent blocks (stuck at 0:01 with silence due to CORS)
+        function startWatchdog() {
+            stopWatchdog();
+            if (isFallbackMode) return; // No monitoring needed if already bypassed
+
+            let lastTime = audioEl.currentTime;
+            let checkCount = 0;
+
+            watchdogTimer = setInterval(() => {
+                if (audioEl.paused) {
+                    stopWatchdog();
+                    return;
+                }
+
+                // If track is in playing state but progress is stuck (and not actively seeking/loading)
+                if (audioEl.currentTime === lastTime && !audioEl.seeking) {
+                    checkCount++;
+                    // If stuck for 3 seconds (6 checks of 500ms)
+                    if (checkCount >= 6) {
+                        console.warn("Watchdog: Playback stall detected. Activating CORS bypass fallback.");
+                        stopWatchdog();
+                        triggerCorsFallback();
+                    }
+                } else {
+                    lastTime = audioEl.currentTime;
+                    checkCount = 0;
+                }
+            }, 500);
+        }
+
+        function stopWatchdog() {
+            if (watchdogTimer) {
+                clearInterval(watchdogTimer);
+                watchdogTimer = null;
+            }
+        }
+
+        // Bypasses visualizer node connection to prioritize direct audio streaming
+        function triggerCorsFallback() {
+            if (isFallbackMode) return;
+            isFallbackMode = true;
+
+            console.warn("CORS handshake failed. Stripping crossorigin credentials to guarantee audio output.");
+            
+            // Remove crossorigin to bypass CORS sandbox restrictions
+            audioEl.removeAttribute('crossorigin');
+            audioEl.src = TRACK_PLAYLIST[currentTrackIndex].url;
+            audioEl.load();
+            playAudio();
+            
+            // Update LED indicator status
+            const led = document.getElementById('audio-engine-led');
+            if (led) {
+                led.className = "w-2.5 h-2.5 rounded-full bg-amber-500 animate-pulse";
+            }
+            
+            // Display visualizer error card overlay
+            const overlay = document.getElementById('visualizer-overlay');
+            if (overlay) {
+                overlay.classList.remove('opacity-0');
+                overlay.style.pointerEvents = "auto"; // make interaction links clickable
+                overlay.innerHTML = `
+                    <div class="text-center p-4 max-w-sm flex flex-col items-center justify-center">
+                        <i class="fa-solid fa-triangle-exclamation text-amber-500 text-lg mb-2"></i>
+                        <p class="text-[10px] font-bold tracking-wider text-amber-500 uppercase mb-1">Visualizer Offline (CORS Blocked)</p>
+                        <p class="text-[9px] font-mono text-monochrome-muted leading-relaxed mb-2">
+                            Browser CORS security has restricted the Web Audio API. The audio will still play, but the visualizer bars won't be visible.
+                        </p>
+                        <p class="text-[9px] font-mono text-monochrome-muted leading-relaxed">
+                            If you just configured CORS on your R2 bucket, please clear your cache or use a private window and <a href="javascript:void(0)" onclick="window.location.reload();" class="text-monochrome-white underline hover:text-monochrome-muted font-bold">reload the page</a> to sync.
+                        </p>
+                    </div>
+                `;
+            }
+            
+            showToast("Visualizer Bypass", "Audio playing in bypass mode due to CORS restrictions.", "fa-triangle-exclamation");
+        }
+
+        function renderPlaylistUI() {
+            const container = document.getElementById('playlist-container');
+            container.innerHTML = ''; // clear previous content
+
+            TRACK_PLAYLIST.forEach((track, index) => {
+                const btn = document.createElement('button');
+                btn.id = `track-item-${index}`;
+                btn.className = `track-item text-left text-xs bg-monochrome-dark border border-monochrome-border hover:border-monochrome-white p-3 rounded-lg transition-all flex items-center justify-between group w-full`;
+                btn.onclick = () => loadTrackAtIndex(index, true);
+
+                btn.innerHTML = `
+                    <span class="truncate pr-4 text-monochrome-white group-hover:translate-x-1 transition-transform flex items-center">
+                        <i class="fa-solid fa-play text-[9px] mr-2 text-monochrome-muted"></i> 
+                        ${track.title}
+                    </span>
+                    <div class="flex items-center gap-2 text-[9px] text-monochrome-muted font-mono">
+                        <span>${track.duration}</span>
+                        <span class="opacity-30">|</span>
+                        <span class="uppercase">TRK ${track.id}</span>
+                    </div>
+                `;
+                container.appendChild(btn);
+            });
+        }
+
+        function loadTrackAtIndex(index, autoPlay = true) {
+            stopWatchdog();
+            currentTrackIndex = index;
+            const track = TRACK_PLAYLIST[index];
+
+            // Update UI text display
+            trackTitle.textContent = track.title;
+            trackArtist.textContent = `Server: ${track.source}`;
+
+            // Highlight active playlist track element and dynamic speaker playing icon
+            const playlistItems = document.querySelectorAll('.track-item');
+            playlistItems.forEach((item, i) => {
+                const icon = item.querySelector('i');
+                if (i === index) {
+                    item.classList.add('border-monochrome-white', 'bg-monochrome-card');
+                    item.classList.remove('border-monochrome-border', 'bg-monochrome-dark');
+                    if (icon) {
+                        icon.className = "fa-solid fa-volume-high text-[9px] mr-2 text-monochrome-white animate-pulse";
+                    }
+                } else {
+                    item.classList.remove('border-monochrome-white', 'bg-monochrome-card');
+                    item.classList.add('border-monochrome-border', 'bg-monochrome-dark');
+                    if (icon) {
+                        icon.className = "fa-solid fa-play text-[9px] mr-2 text-monochrome-muted";
+                    }
+                }
+            });
+
+            // Reset error and fallback state for new files to try normal CORS playback first
+            retryCount = 0;
+            isFallbackMode = false;
+            
+            const led = document.getElementById('audio-engine-led');
+            if (led) {
+                led.className = "w-2.5 h-2.5 rounded-full bg-monochrome-border";
+            }
+
+            // Restore visualizer initial state overlay text
+            const overlay = document.getElementById('visualizer-overlay');
+            if (overlay) {
+                overlay.classList.remove('opacity-0');
+                overlay.style.pointerEvents = "none";
+                overlay.innerHTML = `
+                    <p class="text-[10px] font-mono tracking-wider text-monochrome-muted uppercase">Click play to initiate audio visualizer</p>
+                `;
+            }
+            
+            // Set crossorigin dynamically for the new file load
+            audioEl.setAttribute('crossorigin', 'anonymous');
+
+            // Assign source to audio tag
+            audioEl.src = track.url;
+            audioEl.load();
+            
+            if (autoPlay) {
+                initAudioEngine();
+                resumeContext();
+                playAudio();
+            } else {
+                playIcon.className = "fa-solid fa-play";
+            }
+        }
+
+        function playAudio() {
+            audioEl.play()
+                .then(() => {
+                    playIcon.className = "fa-solid fa-pause";
+                })
+                .catch(err => {
+                    console.warn("Autoplay block detected / loading:", err);
+                    playIcon.className = "fa-solid fa-play";
+                });
+        }
+
+        function initAudioEngine() {
+            // If already in fallback mode, don't execute visualizer connections
+            if (isFallbackMode) return;
+
+            // If audio context is already initialized, update visual state variables and exit
+            if (audioCtx) {
+                const led = document.getElementById('audio-engine-led');
+                if (led) led.className = "w-2.5 h-2.5 rounded-full bg-monochrome-white";
+                
+                const overlay = document.getElementById('visualizer-overlay');
+                if (overlay) overlay.classList.add('opacity-0');
+                return;
+            }
+
+            try {
+                // Initialize clean browser Web Audio context
+                audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+                
+                analyser = audioCtx.createAnalyser();
+                analyser.fftSize = 128; // keeps visualization crisp and latency low
+                
+                // Establish node pipeline from HTML element to analytical nodes
+                sourceNode = audioCtx.createMediaElementSource(audioEl);
+                sourceNode.connect(analyser);
+                analyser.connect(audioCtx.destination);
+
+                // Update visualizer status lights
+                const led = document.getElementById('audio-engine-led');
+                if (led) led.className = "w-2.5 h-2.5 rounded-full bg-monochrome-white";
+
+                // Begin rendering
+                startVisualizerDrawing();
+                
+                // Hide static startup instructions overlay
+                const overlay = document.getElementById('visualizer-overlay');
+                if (overlay) overlay.classList.add('opacity-0');
+            } catch (err) {
+                console.error("Audio Context initialization failed:", err);
+            }
+        }
+
+        function resumeContext() {
+            if (audioCtx && audioCtx.state === 'suspended') {
+                audioCtx.resume();
+            }
+        }
+
+        function startVisualizerDrawing() {
+            canvas = document.getElementById('visualizer-canvas');
+            canvasCtx = canvas.getContext('2d');
+            
+            // Handle high density displays (Retina/DPR)
+            const dpr = window.devicePixelRatio || 1;
+            canvas.width = canvas.clientWidth * dpr;
+            canvas.height = canvas.clientHeight * dpr;
+            canvasCtx.scale(dpr, dpr);
+
+            const bufferLength = analyser.frequencyBinCount;
+            const dataArray = new Uint8Array(bufferLength);
+
+            function draw() {
+                animationId = requestAnimationFrame(draw);
+                
+                const width = canvas.width / dpr;
+                const height = canvas.height / dpr;
+
+                if (visualizerMode === 'wave') {
+                    analyser.getByteTimeDomainData(dataArray);
+                } else {
+                    analyser.getByteFrequencyData(dataArray);
+                }
+
+                // Render flat black background (no gradients)
+                canvasCtx.fillStyle = '#000000';
+                canvasCtx.fillRect(0, 0, width, height);
+
+                // If in fallback mode, output empty silent center line
+                if (isFallbackMode) {
+                    canvasCtx.lineWidth = 1;
+                    canvasCtx.strokeStyle = '#2C2C2E';
+                    canvasCtx.beginPath();
+                    canvasCtx.moveTo(0, height / 2);
+                    canvasCtx.lineTo(width, height / 2);
+                    canvasCtx.stroke();
+                    return;
+                }
+
+                if (visualizerMode === 'bars') {
+                    const barWidth = (width / bufferLength) * 1.5;
+                    let barHeight;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        barHeight = (dataArray[i] / 255) * height * 0.95;
+
+                        canvasCtx.fillStyle = '#FFFFFF';
+                        canvasCtx.fillRect(x, height - barHeight, barWidth - 3, barHeight);
+
+                        x += barWidth;
+                    }
+                } 
+                else if (visualizerMode === 'wave') {
+                    canvasCtx.lineWidth = 1.5;
+                    canvasCtx.strokeStyle = '#FFFFFF';
+                    canvasCtx.beginPath();
+
+                    const sliceWidth = width / bufferLength;
+                    let x = 0;
+
+                    for (let i = 0; i < bufferLength; i++) {
+                        const v = dataArray[i] / 128.0;
+                        const y = (v * height) / 2;
+
+                        if (i === 0) {
+                            canvasCtx.moveTo(x, y);
+                        } else {
+                            canvasCtx.lineTo(x, y);
+                        }
+
+                        x += sliceWidth;
+                    }
+
+                    canvasCtx.lineTo(width, height / 2);
+                    canvasCtx.stroke();
+                }
+            }
+
+            draw();
+        }
+
+        function changeVisualizerMode(mode) {
+            visualizerMode = mode;
+            
+            document.getElementById('v-mode-bars').className = mode === 'bars' ? 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all' : 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all';
+            document.getElementById('v-mode-wave').className = mode === 'wave' ? 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all' : 'px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all';
+        }
+
+        function togglePlay() {
+            initAudioEngine();
+            resumeContext();
+
+            if (audioEl.paused) {
+                playAudio();
+            } else {
+                audioEl.pause();
+                playIcon.className = "fa-solid fa-play";
+            }
+        }
+
+        function stopAudio() {
+            stopWatchdog();
+            audioEl.pause();
+            audioEl.currentTime = 0;
+            playIcon.className = "fa-solid fa-play";
+        }
+
+        function updateVolume(val) {
+            audioEl.volume = val;
+            const volIcon = document.getElementById('volume-icon');
+            if (val == 0) {
+                volIcon.className = "fa-solid fa-volume-xmark text-monochrome-muted";
+            } else if (val < 0.5) {
+                volIcon.className = "fa-solid fa-volume-low text-monochrome-muted";
+            } else {
+                volIcon.className = "fa-solid fa-volume-high text-monochrome-white";
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            const tempAudio = document.getElementById('main-audio');
+            const tempSeek = document.getElementById('seek-bar');
+            const tempContainer = document.getElementById('seek-container');
+            
+            tempAudio.addEventListener('timeupdate', () => {
+                if (tempAudio.duration) {
+                    const percentage = (tempAudio.currentTime / tempAudio.duration) * 100;
+                    tempSeek.style.width = percentage + '%';
+                    
+                    document.getElementById('time-current').textContent = formatTime(tempAudio.currentTime);
+                    document.getElementById('time-total').textContent = formatTime(tempAudio.duration);
+                }
+            });
+
+            tempContainer.addEventListener('click', (e) => {
+                if (tempAudio.duration) {
+                    const rect = tempContainer.getBoundingClientRect();
+                    const clickX = e.clientX - rect.left;
+                    const width = rect.right - rect.left;
+                    const pct = clickX / width;
+                    
+                    tempAudio.currentTime = pct * tempAudio.duration;
+                }
+            });
+        });
+
+        function formatTime(seconds) {
+            if (isNaN(seconds)) return "0:00";
+            const minutes = Math.floor(seconds / 60);
+            const remaining = Math.floor(seconds % 60);
+            return `${minutes}:${remaining < 10 ? '0' : ''}${remaining}`;
+        }
+
+        function showToast(title, desc, iconClass) {
+            const toast = document.getElementById('toast-notif');
+            const icon = document.getElementById('toast-icon');
+            const tTitle = document.getElementById('toast-title');
+            const tDesc = document.getElementById('toast-desc');
+
+            tTitle.textContent = title;
+            tDesc.textContent = desc;
+            icon.className = `text-sm ${iconClass} text-monochrome-white`;
+            
+            toast.classList.remove('translate-y-20', 'opacity-0');
+            toast.classList.add('translate-y-0', 'opacity-100');
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-0', 'opacity-100');
+                toast.classList.add('translate-y-20', 'opacity-0');
+            }, 5000);
+        }
+    </script>
+
+    <!-- Visual Scrollbar & Asset Tweak Styling -->
+    <style>
+        ::-webkit-scrollbar {
+            width: 6px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #000000;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #2C2C2E;
+            border-radius: 999px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #8E8E93;
+        }
+
+        canvas {
+            image-rendering: pixelated;
+            image-rendering: crisp-edges;
+        }
+    </style>
+</head>
+
+<body class="bg-monochrome-black text-monochrome-light font-sans min-h-full flex flex-col justify-between overflow-x-hidden">
+
+    <!-- Header Navigation -->
+    <header class="border-b border-monochrome-border bg-monochrome-darkest sticky top-0 z-40">
+        <div class="max-w-5xl mx-auto px-6 h-16 flex items-center justify-between">
+            <div class="flex items-center gap-3">
+                <span class="text-xl text-monochrome-white"><i class="fa-solid fa-compact-disc animate-spin" style="animation-duration: 6s;"></i></span>
+                <div>
+                    <h1 class="text-sm font-bold tracking-widest text-monochrome-white uppercase">
+                        Brazil Samba Tracks
+                    </h1>
+                </div>
+            </div>
+            
+            <!-- Dynamic Navigation Menu -->
+            <nav class="flex items-center gap-4 text-xs font-mono tracking-widest uppercase">
+                <a href="/drums.html" class="text-monochrome-muted hover:text-monochrome-white transition-colors py-1">drums</a>
+                <span class="text-monochrome-border">|</span>
+                <a href="/listen.html" class="text-monochrome-white font-bold border-b-2 border-monochrome-white py-1">music</a>
+                <span class="text-monochrome-border">|</span>
+                <a href="/creator.html" class="text-monochrome-muted hover:text-monochrome-white transition-colors py-1">creator</a>
+            </nav>
+            
+            <div class="hidden md:flex items-center gap-4">
+                <span class="px-2.5 py-1 rounded bg-monochrome-card border border-monochrome-border text-[10px] tracking-wider text-monochrome-muted font-mono uppercase">
+                    VPN Recommended (US based)
+                </span>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Player Structure -->
+    <main class="max-w-5xl mx-auto px-6 py-12 flex-grow flex flex-col justify-center w-full">
+        <div class="grid grid-cols-1 md:grid-cols-12 gap-10 items-start">
+            
+            <!-- Left Column: Heading and 8-Track Index Panel -->
+            <div class="md:col-span-5 flex flex-col gap-8">
+                <div>
+                    <h1 class="text-3xl font-black tracking-tight text-monochrome-white uppercase mb-4 leading-none">
+                        Brazil Carnival Records
+                    </h1>
+                    <p class="text-sm text-monochrome-muted leading-relaxed">
+                        A curated collection of 8 vibrant samba tracks. Dive into the rhythms of Rio with zero buffering and a sleek monochrome interface.
+                        <br> Perfect for explorers!
+                        <br> All music is from pixabay and all copyright have been sought and cleared. <br>for legal reasons <a href="mailto:legal@andrewgx.com">legal@andrewgx.com</a>
+                        <br> 
+                    </p>
+                </div>
+
+                <div class="flex flex-col gap-2">
+                    <h3 class="text-[10px] font-bold tracking-widest text-monochrome-muted uppercase mb-2">Tracks Index (8 Channels)</h3>
+                    
+                    <!-- Dynamic playlist hook injected here -->
+                    <div class="flex flex-col gap-1.5 h-[340px] overflow-y-auto pr-1" id="playlist-container">
+                        <!-- JS renders all 8 custom tracks seamlessly here -->
+                    </div>
+                </div>
+            </div>
+
+            <!-- Right Column: Interactive Deck and Visualizer -->
+            <div class="md:col-span-7 flex flex-col gap-6">
+                
+                <!-- Main Audio Deck Card -->
+                <div class="bg-monochrome-dark border border-monochrome-border p-6 rounded-xl flex flex-col gap-6 relative">
+                    
+                    <!-- Player Header/Details -->
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-3">
+                            <div class="w-8 h-8 rounded bg-monochrome-border flex items-center justify-center text-monochrome-white text-xs">
+                                <i class="fa-solid fa-volume-high"></i>
+                            </div>
+                            <div>
+                                <h2 id="track-title" class="text-sm font-bold text-monochrome-white truncate max-w-[200px] sm:max-w-xs">Loading...</h2>
+                                <p id="track-artist" class="text-[10px] text-monochrome-muted font-mono">Server Connection...</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center gap-2">
+                            <span class="text-[10px] font-mono text-monochrome-muted">ANALYZER LED:</span>
+                            <div id="audio-engine-led" class="w-2.5 h-2.5 rounded-full bg-monochrome-border transition-all"></div>
+                        </div>
+                    </div>
+
+                    <!-- Audio Progress Scrubber -->
+                    <div class="flex flex-col gap-2">
+                        <div class="flex items-center justify-between text-[10px] font-mono text-monochrome-muted">
+                            <span id="time-current">0:00</span>
+                            <span id="time-total">0:00</span>
+                        </div>
+                        <div class="h-1 bg-monochrome-border rounded-full relative cursor-pointer" id="seek-container">
+                            <div id="seek-bar" class="absolute top-0 left-0 h-full bg-monochrome-white rounded-full w-0 transition-all duration-100"></div>
+                        </div>
+                    </div>
+
+                    <!-- Transport and Audio Parameter Controls -->
+                    <div class="flex items-center justify-between pt-2">
+                        <div class="flex items-center gap-3">
+                            <button id="play-btn" onclick="togglePlay()" class="w-11 h-11 rounded-full bg-monochrome-white text-monochrome-black hover:bg-monochrome-light flex items-center justify-center text-sm font-bold transform active:scale-95 transition-all">
+                                <i id="play-icon" class="fa-solid fa-play ml-0.5"></i>
+                            </button>
+                            <button id="stop-btn" onclick="stopAudio()" class="w-9 h-9 rounded-full bg-monochrome-card border border-monochrome-border hover:border-monochrome-muted text-monochrome-light flex items-center justify-center text-xs transition-all">
+                                <i class="fa-solid fa-stop"></i>
+                            </button>
+                        </div>
+
+                        <!-- Minimal volume sliders -->
+                        <div class="flex items-center gap-3 bg-monochrome-card border border-monochrome-border py-1.5 px-3 rounded-lg">
+                            <i class="fa-solid fa-volume-low text-monochrome-muted text-xs" id="volume-icon"></i>
+                            <input id="volume-slider" type="range" min="0" max="1" step="0.01" value="0.7" oninput="updateVolume(this.value)" class="w-20 accent-monochrome-white h-0.5 bg-monochrome-border rounded-lg cursor-pointer">
+                        </div>
+                    </div>
+
+                    <!-- HTML5 Native Audio Source -->
+                    <!-- Note: crossorigin is managed dynamically by JS to handle potential CORS errors -->
+                    <audio id="main-audio" style="display:none;"></audio>
+                </div>
+
+                <!-- Frequency Visualizer Canvas Panel -->
+                <div class="bg-monochrome-dark border border-monochrome-border p-6 rounded-xl flex flex-col gap-4">
+                    <div class="flex items-center justify-between">
+                        <h4 class="text-[10px] font-bold tracking-widest text-monochrome-muted uppercase">Real-Time Analyzer Spectrum</h4>
+                        
+                        <!-- Visualizer Modes Selection -->
+                        <div class="flex gap-1 bg-monochrome-black p-0.5 rounded border border-monochrome-border">
+                            <button onclick="changeVisualizerMode('bars')" id="v-mode-bars" class="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider bg-monochrome-white text-monochrome-black transition-all">Bars</button>
+                            <button onclick="changeVisualizerMode('wave')" id="v-mode-wave" class="px-2 py-1 rounded text-[9px] font-bold uppercase tracking-wider text-monochrome-muted hover:text-monochrome-white transition-all">Wave</button>
+                        </div>
+                    </div>
+
+                    <!-- Canvas Container Frame -->
+                    <div class="bg-monochrome-black border border-monochrome-border rounded-lg h-40 overflow-hidden relative flex items-center justify-center">
+                        <div id="visualizer-overlay" class="absolute inset-0 flex flex-col items-center justify-center z-10 bg-monochrome-black/95 transition-all pointer-events-none">
+                            <p class="text-[10px] font-mono tracking-wider text-monochrome-muted uppercase">Click play to initiate audio visualizer</p>
+                        </div>
+                        <canvas id="visualizer-canvas" class="w-full h-full bg-monochrome-black"></canvas>
+                    </div>
+                </div>
+
+            </div>
+        </div>
+    </main>
+
+    <!-- UI Action Notification Overlay Toast -->
+    <div id="toast-notif" class="fixed bottom-6 right-6 z-50 transform translate-y-20 opacity-0 transition-all duration-300 bg-monochrome-dark border border-monochrome-white p-4 rounded-lg shadow-2xl flex items-center gap-3">
+        <span id="toast-icon" class="text-sm text-monochrome-white"><i class="fa-solid fa-circle-check"></i></span>
+        <div>
+            <h5 id="toast-title" class="text-xs font-bold text-monochrome-white uppercase tracking-wider">System</h5>
+            <p id="toast-desc" class="text-[10px] text-monochrome-muted font-mono">Process loaded successfully.</p>
+        </div>
+    </div>
+
+    <!-- Minimalist Footer -->
+    <footer class="border-t border-monochrome-border py-6 text-center text-[10px] text-monochrome-muted bg-monochrome-darkest relative z-10 font-mono">
+        <div class="max-w-5xl mx-auto px-6 flex flex-col sm:flex-row items-center justify-between gap-4">
+            <p>© 2026 Andrew Gx (<a href="https://andrewgx.com" target="_blank" class="hover:text-monochrome-white transition-colors">andrewgx.com</a>).</p>
+            <div class="flex items-center gap-4">
+                <span>•</span>
+                <a href="/creator.html"target="_blank" class="hover:text-monochrome-white transition-colors">Open source! check it out!</a>
+            </div>
+        </div>
+    </footer>
+
+</body>
+</html>
